@@ -559,6 +559,30 @@ class VoiceSplit(Event):
     def append(self, event: ty.Union[Note, Chord]) -> 'VoiceSplit':
         self._list.append(event)
         voice = note.voice if note.voice else 1
+        self.voices[voice].append(event)
+    
+    def build_voice_music(voice:ty.List[Note])->MusicList:
+        ...
+        
+    @property
+    def for_ly(self)->str:
+        voices = []
+        for voice in self.voices:
+            voice.append(self.build_voice_music(voice).for_ly)
+        s='\n//\n'.join(voices)
+        s = '<<\n{s}\n>>'
+        return s
+        
+    @classmethod
+    def check(cls, note:Note)->bool:
+        if note.voice:
+            return True
+        return False
+    
+    def get_out_position(self, staff: EventsDictType, start_pos:Position,take:rpr.Take)->Position:
+        for pos, notes in staff:
+            if pos<start_pos:
+                continue
 
 
 def build_staff_music(staff: EventsDictType, take: rpr.Take) -> Staff:
