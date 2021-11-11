@@ -26,9 +26,13 @@ class Event(LyExpr):
 
 class Fractured:
 
+    @property
+    def fraction(self) -> Fraction:
+        raise NotImplementedError()
+
     @classmethod
     def normalized(
-        cls, fraction: Fraction, head: ty.Tuple[Fraction] = tuple()
+        cls, fraction: Fraction, head: ty.Tuple[Fraction, ...] = tuple()
     ) -> ty.Tuple[Fraction, ...]:
 
         def power_of_two(target: int) -> int:
@@ -64,32 +68,32 @@ class Fractured:
             return False
         return other.fraction == self.fraction
 
-    def __gt__(self, other: object) -> bool:
+    def __gt__(self, other: ty.Union[Fraction, 'Fractured']) -> bool:
         if isinstance(other, Fractured):
             other = other.fraction
         return self.fraction > other
 
-    def __lt__(self, other: object) -> bool:
+    def __lt__(self, other: ty.Union[Fraction, 'Fractured']) -> bool:
         if isinstance(other, Fractured):
             other = other.fraction
         return self.fraction < other
 
-    def __add__(self, other: object) -> Fraction:
+    def __add__(self, other: ty.Union[Fraction, 'Fractured']) -> Fraction:
         if isinstance(other, Fractured):
             other = other.fraction
         return self.fraction + other
 
-    def __sub__(self, other: object) -> Fraction:
+    def __sub__(self, other: ty.Union[Fraction, 'Fractured']) -> Fraction:
         if isinstance(other, Fractured):
             other = other.fraction
         return self.fraction - other
 
-    def __mul__(self, other: object) -> Fraction:
+    def __mul__(self, other: ty.Union[Fraction, 'Fractured']) -> Fraction:
         if isinstance(other, Fractured):
             other = other.fraction
         return self.fraction * other
 
-    def __div__(self, other: object) -> Fraction:
+    def __div__(self, other: ty.Union[Fraction, 'Fractured']) -> Fraction:
         if isinstance(other, Fractured):
             other = other.fraction
         return self.fraction / other
@@ -101,10 +105,7 @@ class Fractured:
 class Length(Fractured, LyExpr):
 
     def __init__(
-        self,
-        length: ty.Union[float, Fraction],
-        take: rpr.Take,
-        tie: bool = False
+        self, length: ty.Union[float, Fraction], tie: bool = False
     ) -> None:
         """
         Parameters
@@ -142,7 +143,7 @@ class Length(Fractured, LyExpr):
         elif num == 3:
             return f'{den//2}.'
         elif num < 5:
-            return fraction,
+            return str(fraction)
         raise ValueError(f'can not render duration {fraction}')
 
     @property
@@ -290,14 +291,14 @@ class Note(Event):
         self.staff: ty.Optional[int] = None
         self.voice: ty.Optional[int] = None
         self.accidental = ''
-        self._notation: ty.Optional[Notation] = None
+        self._notation: ty.Optional[ty.List[str]] = None
 
     @property
-    def notation(self) -> ty.Optional[Notation]:
+    def notation(self) -> ty.Optional[ty.List[str]]:
         return self._notation
 
     @notation.setter
-    def notation(self, notation: Notation) -> None:
+    def notation(self, notation: ty.List[str]) -> None:
         self._notation = notation
 
     def __repr__(self) -> str:
@@ -312,7 +313,7 @@ class Note(Event):
         return f"Note({', '.join(items)})"
 
     @property
-    def for_ly(self):
+    def for_ly(self) -> str:
         return self.pitch.for_ly + self.length.for_ly
 
 
@@ -325,12 +326,11 @@ class Rest(Event):
     @property
     def for_ly(self) -> str:
         s = self.r
-        # print(self.length)
         s += re.sub('~', f' {self.r}', self.length.for_ly)
         return s
 
     @property
-    def r(self):
+    def r(self) -> str:
         s = 'r' if not self.big else 'R'
         return s
 
@@ -347,9 +347,7 @@ def parce_notes(notes: rpr.NoteList, take: rpr.Take) -> ty.List[Note]:
         pitch = Pitch(midi_pitch)
         pos_ppq = note_info['ppq_position']
         end = note_info['ppq_end']
-        length = Length(
-            take.ppq_to_beat(end) - take.ppq_to_beat(pos_ppq), take
-        )
+        length = Length(take.ppq_to_beat(end) - take.ppq_to_beat(pos_ppq))
         pos = Position(pos_ppq, take)
         # ly_note = ly.music.items.Note()
         # ly_note.pitch = ly.music.items.Pitch(pitch.for_ly)
@@ -422,7 +420,7 @@ def slpit_by_staff(
     parced_events: EventsDictType,
     split_note: int = 60,
     divided: bool = False
-) -> StaffType:
+) -> ty.Union[StaffType, EventsDictType]:
     staffs: StaffType = ({}, {})
     divided = divided
     for time, events in parced_events.items():
@@ -444,7 +442,7 @@ def slpit_by_staff(
 
 class Chord(Event):
 
-    def __init__(self, length: float, *notes: Note) -> None:
+    def __init__(self, length: Length, *notes: Note) -> None:
         self.length = length
         self.notes = list(notes)
 
@@ -471,15 +469,25 @@ class Music(LyExpr):
     def __init__(self, *events: Event) -> None:
         self._music: ty.List[Event] = list(events)
 
-    def append(self, event: Event) -> 'MusicList':
+    def append(self, event: Event) -> 'Music':
         self._music.append(event)
         return self
 
-    def extend(self, events: ty.List[Event]) -> 'MusicList':
+    def extend(self, events: ty.List[Event]) -> 'Music':
         self._music.extend(events)
         return self
 
-    def __getitem__(self, key: ty.Union[int, slice]) -> Event:
+    @ty.overload
+    def __getitem__(self, key: slice) -> ty.List[Event]:
+        ...
+
+    @ty.overload
+    def __getitem__(self, key: int) -> Event:
+        ...
+
+    def __getitem__(
+        self, key: ty.Union[int, slice]
+    ) -> ty.Union[Event, ty.List[Event]]:
         return self._music[key]
 
     def __len__(self) -> int:
@@ -550,7 +558,61 @@ class StaffGroup(Staff):
         )
 
 
-class VoiceSplit(Event):
+class Voice(MusicList):
+
+    def __init__(self, *events: Event) -> None:
+        super().__init__(*events)
+
+    def build_music(self, events: EventsDictType) -> Music:
+        music = self._music
+        first_pos = None
+        last_pos = tuple(events.keys())[0]
+        last_length = Length(0)
+        for pos, notes in events.items():
+            if first_pos is None:
+                first_pos = pos
+                last_pos = pos
+                if pos.bar > 0:
+                    music.extend(
+                        [Rest(length=Length(4), big=True)] * (pos.bar - 1)
+                    )
+                    if pos.bar_position > 0:
+                        music.append(Rest(Length(pos.bar_position)))
+
+            if pos > last_pos + last_length:
+                print(f'{pos} ({pos.fraction}) >  ({last_pos + last_length})')
+                music.append(Rest(Length(pos - (last_pos + last_length))))
+            if len(notes) > 1:
+                # if VoiceSplit.check()
+                length = notes[0].length
+                event: ty.Union[Note, Chord] = Chord(length, *notes)
+                print('made chord:', event)
+            else:
+                event = notes[0]
+                length = event.length
+            if pos - last_pos < last_length:
+                print(f'{pos} - {last_pos} ({pos-last_pos}) < {last_length}')
+                prev = music[-1]
+                new_duration = Length(prev.length - (pos - last_pos))
+                prev.length = Length(pos - last_pos, tie=True)
+                if isinstance(prev, Chord):
+                    prev = prev.notes
+                elif not isinstance(prev, tuple):
+                    prev = prev,
+                if isinstance(event, Chord):
+                    print(event, prev)
+                    event.extend(prev)
+                else:
+                    event = Chord(length, *prev, event)
+            music.append(event)
+
+            last_length = length
+            last_pos = pos
+
+        return music
+
+
+class VoiceSplit(Voice):
 
     def __init__(self) -> None:
         self.voices = [[], []]
@@ -560,81 +622,28 @@ class VoiceSplit(Event):
         self._list.append(event)
         voice = note.voice if note.voice else 1
         self.voices[voice].append(event)
-    
-    def build_voice_music(voice:ty.List[Note])->MusicList:
-        ...
-        
+
     @property
-    def for_ly(self)->str:
+    def for_ly(self) -> str:
         voices = []
         for voice in self.voices:
             voice.append(self.build_voice_music(voice).for_ly)
-        s='\n//\n'.join(voices)
+        s = '\n//\n'.join(voices)
         s = '<<\n{s}\n>>'
         return s
-        
+
     @classmethod
-    def check(cls, note:Note)->bool:
+    def check(cls, note: Note) -> bool:
         if note.voice:
             return True
         return False
-    
-    def get_out_position(self, staff: EventsDictType, start_pos:Position,take:rpr.Take)->Position:
+
+    def get_out_position(
+        self, staff: EventsDictType, start_pos: Position, take: rpr.Take
+    ) -> Position:
         for pos, notes in staff:
-            if pos<start_pos:
+            if pos < start_pos:
                 continue
-
-
-def build_staff_music(staff: EventsDictType, take: rpr.Take) -> Staff:
-    music = Staff()
-    first_pos = None
-    last_pos = tuple(staff.keys())[0]
-    last_length = Length(0, take)
-    for pos, notes in staff.items():
-        if first_pos is None:
-            first_pos = pos
-            last_pos = pos
-            if pos.bar > 0:
-                music.extend(
-                    [Rest(length=Length(4, take), big=True)] * (pos.bar - 1)
-                )
-                if pos.bar_position > 0:
-                    music.append(Rest(Length(pos.bar_position, take)))
-
-        if pos > last_pos + last_length:
-            print(f'{pos} ({pos.fraction}) >  ({last_pos + last_length})')
-            music.append(Rest(Length(pos - (last_pos + last_length), take)))
-        if len(notes) > 1:
-            # if VoiceSplit.check()
-            length = notes[0].length
-            event = Chord(length, *notes)
-            print('made chord:', event)
-        else:
-            event = notes[0]
-            length = event.length
-        if pos - last_pos < last_length:
-            print(f'{pos} - {last_pos} ({pos-last_pos}) < {last_length}')
-            prev = music[-1]
-            new_duration = Length(prev.length - (pos - last_pos), take)
-            prev.length = Length(pos - last_pos, take, tie=True)
-            if isinstance(prev, Chord):
-                prev = prev.notes
-            elif not isinstance(prev, tuple):
-                prev = prev,
-            if isinstance(event, Chord):
-                print(event, prev)
-                event.extend(prev)
-            else:
-                event = Chord(length, *prev, event)
-        music.append(event)
-
-        last_length = length
-        last_pos = pos
-
-
-#     print(music.write())
-#     print('\n\n------\n\n')
-    return music
 
 
 @rpr.inside_reaper()
