@@ -11,5 +11,5 @@ setup(
     # },
     packages=['rea_extensions'],  # same as name
     package_data={'rea_extensions': ['py.typed']},
-    install_requires=['python-reapy'],
+    install_requires=['reapy-boost @ git+https://github.com/Levitanus/reapy-boost.git'],
 )
